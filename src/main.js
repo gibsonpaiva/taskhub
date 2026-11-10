@@ -455,47 +455,52 @@ function setupEventListeners() {
     const form = e.target;
     const data = new FormData(form);
 
-    if (form.id === 'form-quick-add') {
-      const title = (data.get('title') || '').trim();
-      if (!title) return;
-      const created = await db.createTask({ title });
-      uiState.kanbanFilters = { ...EMPTY_FILTERS }; // garante que a nova tarefa apareça
-      showToast(`${created.code} criada`);
-      renderApp();
-      document.getElementById('quick-add-input')?.focus();
-    } else if (form.id === 'form-new-task') {
-      const checklist = (data.get('checklistLines') || '')
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((text, i) => ({ id: `chk-${Date.now()}-${i}`, text, done: false }));
+    try {
+      if (form.id === 'form-quick-add') {
+        const title = (data.get('title') || '').trim();
+        if (!title) return;
+        const created = await db.createTask({ title });
+        uiState.kanbanFilters = { ...EMPTY_FILTERS }; // garante que a nova tarefa apareça
+        showToast(`${created.code} criada`);
+        renderApp();
+        document.getElementById('quick-add-input')?.focus();
+      } else if (form.id === 'form-new-task') {
+        const checklist = (data.get('checklistLines') || '')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((text, i) => ({ id: `chk-${Date.now()}-${i}`, text, done: false }));
 
-      const created = await db.createTask({
-        title: data.get('title'),
-        system: (data.get('system') || '').trim(),
-        client: (data.get('client') || '').trim(),
-        ticketNumber: (data.get('ticketNumber') || '').trim(),
-        priority: data.get('priority'),
-        deadline: (data.get('deadline') || '').trim(),
-        assignedToId: data.get('assignedToId'),
-        description: data.get('description'),
-        checklist,
-      });
-      uiState.kanbanFilters = { ...EMPTY_FILTERS };
-      closeModal();
-      showToast(`${created.code} criada`);
-      renderApp({ skipModal: true });
-    } else if (form.id === 'form-add-checklist-item') {
-      const text = data.get('checkText');
-      if (!text) return;
-      await db.addChecklistItem(form.dataset.taskId, text);
-      renderApp();
-      document.getElementById('checklist-add-input')?.focus(); // permite adicionar vários em sequência
-    } else if (form.id === 'form-add-comment') {
-      const text = data.get('commentText');
-      if (!text) return;
-      await db.addComment(form.dataset.taskId, text);
-      renderModalOnly();
+        const created = await db.createTask({
+          title: data.get('title'),
+          system: (data.get('system') || '').trim(),
+          client: (data.get('client') || '').trim(),
+          ticketNumber: (data.get('ticketNumber') || '').trim(),
+          priority: data.get('priority'),
+          deadline: (data.get('deadline') || '').trim(),
+          assignedToId: data.get('assignedToId'),
+          description: data.get('description'),
+          checklist,
+        });
+        uiState.kanbanFilters = { ...EMPTY_FILTERS };
+        closeModal();
+        showToast(`${created.code} criada`);
+        renderApp({ skipModal: true });
+      } else if (form.id === 'form-add-checklist-item') {
+        const text = data.get('checkText');
+        if (!text) return;
+        await db.addChecklistItem(form.dataset.taskId, text);
+        renderApp();
+        document.getElementById('checklist-add-input')?.focus(); // permite adicionar vários em sequência
+      } else if (form.id === 'form-add-comment') {
+        const text = data.get('commentText');
+        if (!text) return;
+        await db.addComment(form.dataset.taskId, text);
+        renderModalOnly();
+      }
+    } catch (err) {
+      console.error('Erro ao salvar:', err);
+      showToast(err.message || 'Não foi possível salvar. Tente de novo.', 'error');
     }
   });
 
