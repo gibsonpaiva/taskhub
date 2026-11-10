@@ -1,0 +1,68 @@
+/* ==========================================================================
+   TASKHUB — estilos mínimos (o resto vem do Tailwind)
+   ========================================================================== */
+
+:root {
+  --accent: #E52521;
+  --spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Scrollbar discreta */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.25); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.45); }
+
+/* Modal */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.modal-backdrop { animation: fadeIn 0.18s ease-out both; }
+.modal-backdrop.closing { animation: fadeOut 0.14s ease-in forwards; }
+.modal-window { animation: popIn 0.24s var(--spring) both; }
+/* Re-render com modal já aberto: sem reanimar */
+.modal-backdrop.no-anim,
+.modal-backdrop.no-anim .modal-window { animation: none; }
+
+.toast { animation: toastIn 0.2s var(--spring) both; }
+
+/* Cards do quadro */
+.task-card {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+.task-card:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 6px 16px -4px rgba(15, 23, 42, 0.12);
+}
+.task-card.dragging { opacity: 0.4; }
+
+/* Coluna alvo durante arrastar */
+.drop-target { background-color: rgba(37, 99, 235, 0.06); outline: 2px dashed #93C5FD; outline-offset: -2px; }
+
+button { transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+button:active { transform: scale(0.97); }
+
+/* Dropzone de anexos */
+.drag-over { border-color: var(--accent) !important; background-color: rgba(229, 37, 33, 0.04) !important; }
+
+/* Item de checklist concluído */
+.checklist-done-text { text-decoration: line-through; color: #94A3B8; }
+
+/* Impressão: só o conteúdo principal */
+@media print {
+  body { background: #FFF !important; }
+  .no-print { display: none !important; }
+  #main-view-content { max-width: none !important; padding: 0 !important; }
+}

@@ -1,0 +1,54 @@
+# Variáveis de ambiente sensíveis
+.env
+.env.local
+.env.production
+.env*.local
+
+# Banco SQLite local (agora usa Supabase)
+*.sqlite3
+*.db
+
+# Uploads locais (agora usa Supabase Storage)
+uploads/*
+!uploads/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyc
+venv/
+env/
+
+# MacOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Logs
+*.log
+logs/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Vercel
+.vercel
+
+# Node (caso adicione depois)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Backups locais
+backup_*
+MIGRAÇÃO_CONCLUÍDA.md
+LEIA-ME-PRIMEIRO.md
+limpar_dados_antigos.html
+testar_supabase.html

@@ -1,0 +1,10 @@
+{
+  "name": "taskhub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TaskHub — gestão de tarefas (frontend estático + funções serverless na Vercel para notificações push)",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "web-push": "^3.6.7"
+  }
+}

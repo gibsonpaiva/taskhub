@@ -1,0 +1,57 @@
+========================================
+COMANDOS RÁPIDOS - GITHUB + VERCEL
+========================================
+
+# 1. PRIMEIRA VEZ - SUBIR PARA GITHUB
+cd "/Users/gibsonpaiva/Documents/AI STUDIO-LOCAL/taskhub"
+git init
+git add .
+git commit -m "feat: TaskHub inicial com Supabase"
+git remote add origin https://github.com/SEU-USUARIO/taskhub.git
+git branch -M main
+git push -u origin main
+
+# 2. FAZER MUDANÇAS E ATUALIZAR
+git add .
+git commit -m "descrição da mudança"
+git push
+
+# 3. VER STATUS
+git status
+
+# 4. VER HISTÓRICO
+git log --oneline
+
+# 5. CRIAR NOVA BRANCH
+git checkout -b minha-feature
+git push -u origin minha-feature
+
+# 6. VOLTAR PARA MAIN
+git checkout main
+
+========================================
+DEPLOY VERCEL (via CLI)
+========================================
+
+# Instalar CLI (uma vez só)
+npm install -g vercel
+
+# Login (uma vez só)
+vercel login
+
+# Deploy
+cd "/Users/gibsonpaiva/Documents/AI STUDIO-LOCAL/taskhub"
+vercel
+
+# Deploy em produção
+vercel --prod
+
+========================================
+IMPORTANTE
+========================================
+
+❌ NUNCA commite o arquivo .env
+✅ Sempre verifique com: git status
+✅ O .gitignore já está configurado
+
+========================================
