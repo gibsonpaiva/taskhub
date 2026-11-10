@@ -37,6 +37,11 @@ CREATE POLICY "push_subscriptions_delete_own"
   TO authenticated
   USING (true);
 
--- Leitura de TODAS as inscrições fica restrita ao backend (service_role),
--- que é quem realmente precisa listar todo mundo para enviar o push.
--- Não criamos política de SELECT para "authenticated" de propósito.
+-- Leitura: precisa ser liberada para "authenticated" também — o "upsert" (criar OU
+-- atualizar) exige que o Postgres consiga verificar se a linha já existe, e isso
+-- conta como uma leitura. Sem esta política, o upsert falha com erro 42501.
+DROP POLICY IF EXISTS "push_subscriptions_select_own" ON push_subscriptions;
+CREATE POLICY "push_subscriptions_select_own"
+  ON push_subscriptions FOR SELECT
+  TO authenticated
+  USING (true);
