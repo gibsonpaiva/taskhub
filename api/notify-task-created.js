@@ -39,6 +39,17 @@ module.exports = async (req, res) => {
 
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
 
+  // Busca o nome de quem abriu a tarefa (o webhook só manda o id, não o nome).
+  let creatorName = 'Alguém';
+  if (record.created_by_id) {
+    const { data: creator } = await supabaseAdmin
+      .from('users')
+      .select('name')
+      .eq('id', record.created_by_id)
+      .maybeSingle();
+    if (creator?.name) creatorName = creator.name;
+  }
+
   const { data: subscriptions, error } = await supabaseAdmin
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth');
@@ -50,8 +61,8 @@ module.exports = async (req, res) => {
   }
 
   const payload = JSON.stringify({
-    title: 'Nova tarefa criada',
-    body: `${record.code || ''} · ${record.title || ''}`.trim(),
+    title: `Nova Tarefa: ${record.title || ''}`.trim(),
+    body: `de ${creatorName} · ${record.code || ''}`.trim(),
     taskId: record.id,
     url: `/?task=${record.id}`,
     tag: `task-${record.id}`,
