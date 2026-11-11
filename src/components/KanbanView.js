@@ -25,11 +25,12 @@ export function priorityBadge(priority) {
   return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${PRIORITY_STYLE[priority] || PRIORITY_STYLE.Baixa}">${escapeHtml(priority)}</span>`;
 }
 
-// Filtra as tarefas conforme busca, filtro rápido e responsável.
+// Filtra as tarefas conforme busca, filtro rápido, responsável e cliente.
 function applyFilters(tasks, users, currentUser, filters) {
   const q = (filters.search || '').toLowerCase().trim();
   const quick = filters.quick || 'all';
   const analyst = filters.analyst || 'ALL';
+  const client = filters.client || 'ALL';
 
   return tasks.filter((t) => {
     if (q) {
@@ -41,8 +42,15 @@ function applyFilters(tasks, users, currentUser, filters) {
     if (quick === 'urgent' && !(t.priority === 'Crítica' || t.priority === 'Alta')) return false;
     if (quick === 'blocked' && t.status !== BLOCKED) return false;
     if (analyst !== 'ALL' && t.assignedToId !== analyst) return false;
+    if (client !== 'ALL' && t.client !== client) return false;
     return true;
   });
+}
+
+// Lista de clientes distintos presentes nas tarefas, para popular o filtro.
+function uniqueClients(tasks) {
+  const set = new Set(tasks.map((t) => (t.client || '').trim()).filter(Boolean));
+  return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
 
 // Botão único e contextual: a próxima ação mais provável para a tarefa.
@@ -106,6 +114,8 @@ export function renderKanbanView({ state, currentUser, filters = {}, viewMode = 
   const users = state.users || [];
   const quick = filters.quick || 'all';
   const analyst = filters.analyst || 'ALL';
+  const client = filters.client || 'ALL';
+  const clients = uniqueClients(tasks);
 
   const total = tasks.length;
   const blocked = tasks.filter((t) => t.status === BLOCKED).length;
@@ -153,6 +163,11 @@ export function renderKanbanView({ state, currentUser, filters = {}, viewMode = 
         <select id="filter-analyst-select" class="px-2 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700">
           <option value="ALL">Todos</option>
           ${users.map((u) => `<option value="${u.id}" ${analyst === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+        </select>
+
+        <select id="filter-client-select" class="px-2 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700">
+          <option value="ALL">Todos os clientes</option>
+          ${clients.map((c) => `<option value="${escapeHtml(c)}" ${client === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
         </select>
 
         <div class="flex-1 min-w-[160px] max-w-xs flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 focus-within:border-slate-400">

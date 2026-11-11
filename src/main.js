@@ -16,7 +16,7 @@ import { escapeHtml } from './utils/markdown.js';
 import { snapshotPositions, playFlip, pulseLanding, syncEmptyPlaceholder } from './utils/flip.js';
 
 const BLOCKED = 'Bloqueada / Aguardando';
-const EMPTY_FILTERS = { search: '', quick: 'all', analyst: 'ALL' };
+const EMPTY_FILTERS = { search: '', quick: 'all', analyst: 'ALL', client: 'ALL' };
 
 const uiState = {
   currentTab: 'kanban', // 'kanban' | 'audit'
@@ -417,6 +417,10 @@ function setupEventListeners() {
 
     if (t.id === 'filter-analyst-select') {
       uiState.kanbanFilters.analyst = t.value;
+      return renderApp({ skipModal: true });
+    }
+    if (t.id === 'filter-client-select') {
+      uiState.kanbanFilters.client = t.value;
       return renderApp({ skipModal: true });
     }
     if (t.id === 'audit-filter-user') {
