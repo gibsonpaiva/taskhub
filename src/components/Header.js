@@ -16,7 +16,7 @@ export function renderHeader({ currentTab, state, currentUser, pushEnabled = fal
     <header class="no-print bg-white border-b border-slate-200">
       <div class="max-w-[1600px] mx-auto px-3 sm:px-6 h-14 flex items-center gap-2 sm:gap-4">
         <div class="flex items-center gap-2 shrink-0">
-          <div class="w-7 h-7 rounded-lg bg-[#E52521] text-white font-extrabold text-[12px] flex items-center justify-center">TH</div>
+          <img src="/img/tarefa-concluida.png" alt="TaskHub" class="w-7 h-7 rounded-lg object-cover" />
           <span class="hidden sm:inline font-extrabold text-sm tracking-tight">TaskHub</span>
         </div>
 

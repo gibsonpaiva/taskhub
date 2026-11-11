@@ -26,8 +26,8 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "TaskHub";
   const options = {
     body: payload.body || "",
-    icon: "/img/icon-192.png",
-    badge: "/img/icon-192.png",
+    icon: "/img/tarefa-concluida.png",
+    badge: "/img/tarefa-concluida.png",
     data: { taskId: payload.taskId || null, url: payload.url || "/" },
     tag: payload.tag || undefined,
   };

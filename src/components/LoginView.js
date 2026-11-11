@@ -97,7 +97,7 @@ export function renderLoginView({ mode = 'login', email = '', name = '' } = {}) 
         <!-- Formulário -->
         <section class="flex-1 min-w-0 flex flex-col px-7 sm:px-12 lg:px-10 py-8">
           <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-[#E52521] text-white font-extrabold text-sm flex items-center justify-center">TH</div>
+            <img src="/img/tarefa-concluida.png" alt="TaskHub" class="w-9 h-9 rounded-xl object-cover" />
             <span class="text-2xl font-black tracking-tight text-slate-800">TaskHub</span>
           </div>
 

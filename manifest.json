@@ -9,13 +9,13 @@
   "theme_color": "#E52521",
   "icons": [
     {
-      "src": "/img/icon-192.png",
+      "src": "/img/tarefa-concluida.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/img/icon-512.png",
+      "src": "/img/tarefa-concluida.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
