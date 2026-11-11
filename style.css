@@ -46,9 +46,25 @@ body {
   border-color: #CBD5E1;
   box-shadow: 0 6px 16px -4px rgba(15, 23, 42, 0.12);
 }
-.task-card.dragging { opacity: 0.4; }
+/* Card de origem some suavemente enquanto a imagem "levantada" segue o cursor */
+.task-card.dragging { opacity: 0.35; }
 
-/* Coluna alvo durante arrastar */
+/* Clone usado como imagem de arrasto (dataTransfer.setDragImage): card "levantado" */
+.drag-ghost {
+  transform: scale(1.045) rotate(-1.5deg);
+  box-shadow: 0 20px 38px -12px rgba(15, 23, 42, 0.4);
+}
+
+/* Pulso rápido no card que acabou de "pousar" na coluna nova */
+@keyframes landPulse {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+  70% { box-shadow: 0 0 0 9px rgba(37, 99, 235, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+}
+.task-card.card-landed { animation: landPulse 0.6s ease-out; }
+
+/* Coluna alvo durante arrastar (com transição suave ao entrar/saída) */
+[data-column-status] { transition: background-color 0.15s ease, outline-color 0.15s ease; }
 .drop-target { background-color: rgba(37, 99, 235, 0.06); outline: 2px dashed #93C5FD; outline-offset: -2px; }
 
 button { transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease; }

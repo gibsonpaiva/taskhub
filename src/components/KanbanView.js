@@ -209,12 +209,9 @@ function renderColumns(tasks, users, currentUser) {
               </span>
               <span class="font-mono text-[11px] text-slate-500">${colTasks.length}</span>
             </div>
-            <div class="space-y-2 flex-1">
-              ${
-                colTasks.length === 0
-                  ? `<div class="text-center text-[11px] text-slate-400 py-8">Vazio</div>`
-                  : colTasks.map((t) => renderCard(t, users, currentUser)).join('')
-              }
+            <div class="space-y-2 flex-1" data-role="card-list">
+              <div class="text-center text-[11px] text-slate-400 py-8" data-role="empty-placeholder" style="${colTasks.length ? 'display:none' : ''}">Vazio</div>
+              ${colTasks.map((t) => renderCard(t, users, currentUser)).join('')}
             </div>
           </section>`;
       }).join('')}

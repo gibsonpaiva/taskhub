@@ -13,6 +13,7 @@ import { mountLogin } from './components/LoginView.js';
 import { getSessionUser, isRecoveryFlow, signOut } from './services/auth.js';
 import { isPushSupported, registerServiceWorker, getExistingSubscription, enablePushNotifications, disablePushNotifications } from './services/pushNotifications.js';
 import { escapeHtml } from './utils/markdown.js';
+import { snapshotPositions, playFlip, pulseLanding, syncEmptyPlaceholder } from './utils/flip.js';
 
 const BLOCKED = 'Bloqueada / Aguardando';
 const EMPTY_FILTERS = { search: '', quick: 'all', analyst: 'ALL' };
@@ -151,16 +152,17 @@ function openModal(name, taskId = null) {
 
 function renderApp({ skipModal = false } = {}) {
   const root = document.getElementById('app');
-  if (!root) return;
+  if (!root) return Promise.resolve();
 
   const currentUser = db.getCurrentUser();
   if (!currentUser) {
     root.innerHTML = `<p class="p-10 text-sm text-slate-500">Carregando usuários...</p>`;
-    return;
+    return Promise.resolve();
   }
 
-  // Carregar tarefas do banco (async)
-  db.getTasks().then(async tasks => {
+  // Carregar tarefas do banco (async) — retorna a Promise para quem precisar
+  // esperar o DOM terminar de atualizar (ex.: animação de troca de coluna).
+  return db.getTasks().then(async tasks => {
     const state = { 
       currentUser, 
       users: db.users, 
@@ -280,9 +282,12 @@ window.addEventListener('paste', (e) => {
 // AÇÕES
 // =============================================================================
 async function changeStatus(taskId, status, reason = '') {
+  const before = snapshotPositions();
   const task = await db.updateTaskStatus(taskId, status, reason);
   if (task) showToast(`${task.code}: ${status}`);
-  renderApp();
+  await renderApp();
+  playFlip(before);
+  pulseLanding(taskId);
 }
 
 const actions = {
@@ -526,20 +531,56 @@ function setupEventListeners() {
     }
   });
 
-  // Arrastar cards entre colunas
+  // Arrastar cards entre colunas, com reordenação em tempo real (estilo Trello)
   const clearDropTargets = () => document.querySelectorAll('.drop-target').forEach((c) => c.classList.remove('drop-target'));
+
+  let dragOrigin = null; // { parent, nextSibling } — para devolver o card ao lugar se o arrasto for cancelado
+  let dropHandled = false; // true assim que um 'drop' válido é processado (evita o dragend desfazer o preview)
+  let lastOverKey = ''; // evita reordenar o DOM a cada pixel do mouse; só age quando o alvo muda
 
   document.addEventListener('dragstart', (e) => {
     const card = e.target.closest?.('.task-card');
     if (!card) return;
     draggingTaskId = card.dataset.taskId;
+    dropHandled = false;
+    lastOverKey = '';
+    dragOrigin = { parent: card.parentElement, nextSibling: card.nextElementSibling };
+
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', draggingTaskId);
-    card.classList.add('dragging');
+
+    // Imagem de arrasto "levantada": um clone estilizado segue o cursor;
+    // o card original (dimmed) permanece no lugar até a reordenação ao vivo o mover.
+    const rect = card.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.style.position = 'fixed';
+    ghost.style.top = '-9999px';
+    ghost.style.left = '-9999px';
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.pointerEvents = 'none';
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
+    setTimeout(() => ghost.remove(), 0);
+
+    requestAnimationFrame(() => card.classList.add('dragging'));
   });
 
   document.addEventListener('dragend', () => {
+    if (!dropHandled && dragOrigin) {
+      // Arrasto cancelado (Esc, soltou fora de uma coluna válida): devolve o card ao lugar original.
+      const card = document.querySelector(`.task-card[data-task-id="${draggingTaskId}"]`);
+      if (card) {
+        const before = snapshotPositions();
+        const prevList = card.parentElement;
+        dragOrigin.parent.insertBefore(card, dragOrigin.nextSibling);
+        playFlip(before);
+        syncEmptyPlaceholder(dragOrigin.parent);
+        if (prevList !== dragOrigin.parent) syncEmptyPlaceholder(prevList);
+      }
+    }
     draggingTaskId = null;
+    dragOrigin = null;
     document.querySelectorAll('.dragging').forEach((c) => c.classList.remove('dragging'));
     clearDropTargets();
   });
@@ -549,9 +590,52 @@ function setupEventListeners() {
     const col = e.target.closest?.('[data-column-status]');
     if (!col) return;
     e.preventDefault();
+
     if (!col.classList.contains('drop-target')) {
       clearDropTargets();
       col.classList.add('drop-target');
+    }
+
+    const task = db.getTaskById(draggingTaskId);
+    const card = document.querySelector(`.task-card[data-task-id="${draggingTaskId}"]`);
+    if (!task || !card) return;
+
+    // Sobre a coluna de origem: devolve o card ao lugar exato (sem reordenação manual persistida).
+    if (col.dataset.columnStatus === task.status) {
+      if (lastOverKey !== 'origin') {
+        lastOverKey = 'origin';
+        const before = snapshotPositions();
+        const prevList = card.parentElement;
+        dragOrigin.parent.insertBefore(card, dragOrigin.nextSibling);
+        playFlip(before);
+        syncEmptyPlaceholder(dragOrigin.parent);
+        if (prevList !== dragOrigin.parent) syncEmptyPlaceholder(prevList);
+      }
+      return;
+    }
+
+    // Sobre uma coluna diferente: os cards dela se abrem para mostrar onde o card vai entrar.
+    const list = col.querySelector('[data-role="card-list"]');
+    if (!list) return;
+    const siblings = [...list.querySelectorAll('.task-card')].filter((c) => c !== card);
+    let targetIndex = siblings.length;
+    for (let i = 0; i < siblings.length; i++) {
+      const rect = siblings[i].getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) { targetIndex = i; break; }
+    }
+
+    const key = `${col.dataset.columnStatus}:${targetIndex}`;
+    if (key === lastOverKey) return;
+    lastOverKey = key;
+
+    const refNode = siblings[targetIndex] || null;
+    if (card.parentElement !== list || card.nextElementSibling !== refNode) {
+      const before = snapshotPositions();
+      const prevList = card.parentElement;
+      list.insertBefore(card, refNode);
+      playFlip(before);
+      syncEmptyPlaceholder(list);
+      if (prevList !== list) syncEmptyPlaceholder(prevList);
     }
   });
 
@@ -563,11 +647,12 @@ function setupEventListeners() {
 
     const taskId = draggingTaskId;
     const status = col.dataset.columnStatus;
+    dropHandled = true;
     draggingTaskId = null;
     clearDropTargets();
 
     const task = db.getTaskById(taskId);
-    if (!task || task.status === status) return;
+    if (!task || task.status === status) return; // sem mudança real: o card já está de volta ao lugar original
 
     let reason = '';
     if (status === BLOCKED) {
