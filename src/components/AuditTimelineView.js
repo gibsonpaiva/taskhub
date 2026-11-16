@@ -73,11 +73,6 @@ export function renderAuditList({ state, filters = {} }) {
   // V2: auditLog agora é uma tabela separada em state.auditLog
   const auditLogs = state.auditLog || [];
   
-  console.log('🔍 renderAuditList chamado');
-  console.log('   - auditLogs:', auditLogs.length);
-  console.log('   - tasks:', tasks.length);
-  console.log('   - filters:', filters);
-  
   // Criar mapa de tasks para lookup rápido
   const taskMap = {};
   tasks.forEach((t) => {

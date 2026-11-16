@@ -11,7 +11,7 @@ echo "  Iniciando TaskHub — Gestão Operacional & Continuidade de Backup TI   
 echo "========================================================================"
 echo ""
 echo "Diretório do Projeto: $DIR"
-echo "Iniciando servidor local com persistência SQLite..."
+echo "Iniciando servidor local (dados e anexos ficam no Supabase)..."
 echo ""
 
 # Verifica Python 3

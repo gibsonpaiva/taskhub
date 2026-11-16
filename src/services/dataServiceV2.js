@@ -16,6 +16,20 @@ const AVATAR_GRADIENTS = [
 
 const STATUS_BLOCKED = 'Bloqueada / Aguardando';
 
+const TASK_SELECT = `
+  *,
+  checklist:checklist_items(*),
+  comments(*),
+  attachments(*),
+  audit:audit_log(*)
+`;
+
+// Extrai o número de um código "TASK-123". Devolve null se o formato não bater.
+function taskNumber(code) {
+  const m = /^TASK-(\d+)$/.exec(String(code || ''));
+  return m ? parseInt(m[1], 10) : null;
+}
+
 function newId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -94,26 +108,9 @@ class DataServiceV2 {
     };
   }
 
-  async getTasks() {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select(`
-        *,
-        checklist:checklist_items(*),
-        comments(*),
-        attachments(*),
-        audit:audit_log(*)
-      `)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Erro ao carregar tarefas:', error);
-      return [];
-    }
-
-    // Transformar para formato compatível com o frontend
-    return (data || []).map(t => ({
+  // Converte uma linha do banco (snake_case, com relações embutidas) para o formato usado pela interface.
+  mapTask(t) {
+    return {
       ...t,
       assignedToId: t.assigned_to_id,
       createdById: t.created_by_id,
@@ -124,7 +121,7 @@ class DataServiceV2 {
       completedAt: t.completed_at,
       checklist: t.checklist || [],
       comments: t.comments || [],
-      attachments: t.attachments.map(a => ({
+      attachments: (t.attachments || []).map(a => ({
         ...a,
         fileName: a.file_name,
         uploadedBy: a.uploaded_by,
@@ -135,16 +132,45 @@ class DataServiceV2 {
         actorName: a.actor_name,
         timestamp: a.created_at
       }))
-    }));
+    };
   }
 
+  // Lança erro quando a leitura falha. Antes devolvia lista vazia, o que parecia perda de dados na tela.
+  async getTasks() {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao carregar tarefas:', error);
+      throw new Error('Não foi possível carregar as tarefas. Verifique a conexão e tente de novo.');
+    }
+
+    return (data || []).map(t => this.mapTask(t));
+  }
+
+  // Busca só a tarefa pedida (antes baixava todas as tarefas e filtrava no navegador).
   async getTaskById(taskId) {
-    const tasks = await this.getTasks();
-    return tasks.find(t => t.id === taskId);
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .eq('id', taskId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Erro ao carregar tarefa:', error);
+      throw new Error('Não foi possível carregar a tarefa.');
+    }
+
+    return data ? this.mapTask(data) : null;
   }
 
-  // Registra um evento na trilha de auditoria
-  async log(taskId, action, description, metadata = null) {
+  // Registra um evento na trilha de auditoria.
+  // touch=false evita atualizar tasks.updated_at (ex.: tarefa recém-excluída, que a RLS já não deixa alterar).
+  async log(taskId, action, description, metadata = null, { touch = true } = {}) {
     const currentUser = this.getCurrentUser();
     const now = new Date().toISOString();
 
@@ -163,11 +189,12 @@ class DataServiceV2 {
 
     if (error) console.error('Erro ao registrar log:', error);
 
-    // Atualizar updated_at da tarefa
-    await supabase
-      .from('tasks')
-      .update({ updated_at: now })
-      .eq('id', taskId);
+    if (touch) {
+      await supabase
+        .from('tasks')
+        .update({ updated_at: now })
+        .eq('id', taskId);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -177,22 +204,10 @@ class DataServiceV2 {
     const currentUser = this.getCurrentUser();
     const nowIso = new Date().toISOString();
 
-    // Gerar próximo código
-    const { data: tasks } = await supabase
-      .from('tasks')
-      .select('code')
-      .order('code', { ascending: false })
-      .limit(1);
-
-    const lastCode = tasks?.[0]?.code || 'TASK-100';
-    const num = parseInt(lastCode.replace('TASK-', ''), 10);
-    const code = `TASK-${num + 1}`;
-
     const assignedToId = data.assignedToId || currentUser.id;
 
     const taskData = {
       id: newId('task'),
-      code,
       title: (data.title || '').trim() || 'Nova tarefa',
       description: data.description || '',
       status: 'Não Iniciada',
@@ -209,16 +224,42 @@ class DataServiceV2 {
       updated_at: nowIso
     };
 
-    const { data: task, error } = await supabase
-      .from('tasks')
-      .insert([taskData])
-      .select()
-      .single();
+    // O próximo código é o maior número existente + 1 (comparação numérica: TASK-1000 vem depois de TASK-999).
+    // A coluna `code` é UNIQUE. Se outra pessoa criar uma tarefa ao mesmo tempo, ou se o maior código
+    // pertencer a uma tarefa excluída (que a RLS esconde da consulta), o insert falha com 23505
+    // e tentamos de novo com o número seguinte.
+    const MAX_ATTEMPTS = 8;
+    let task = null;
+    let nextNum = null;
 
-    if (error) {
-      console.error('Erro ao criar tarefa:', error);
-      throw error;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS && !task; attempt++) {
+      if (nextNum === null) {
+        const { data: rows, error: codesError } = await supabase.from('tasks').select('code');
+        if (codesError) {
+          console.error('Erro ao gerar código da tarefa:', codesError);
+          throw new Error('Não foi possível gerar o código da tarefa.');
+        }
+        const numbers = (rows || []).map((r) => taskNumber(r.code)).filter((n) => n !== null);
+        nextNum = Math.max(100, ...numbers) + 1;
+      }
+
+      const { data: inserted, error } = await supabase
+        .from('tasks')
+        .insert([{ ...taskData, code: `TASK-${nextNum}` }])
+        .select()
+        .single();
+
+      if (!error) {
+        task = inserted;
+      } else if (error.code === '23505' && /code/i.test(`${error.message} ${error.details || ''}`)) {
+        nextNum += 1; // código já usado: tenta o seguinte
+      } else {
+        console.error('Erro ao criar tarefa:', error);
+        throw error;
+      }
     }
+
+    if (!task) throw new Error('Não foi possível gerar um código único para a tarefa. Tente de novo.');
 
     // Criar checklist se houver
     if (data.checklist && data.checklist.length > 0) {
@@ -230,7 +271,11 @@ class DataServiceV2 {
         position: i
       }));
 
-      await supabase.from('checklist_items').insert(checklistData);
+      const { error: checklistError } = await supabase.from('checklist_items').insert(checklistData);
+      if (checklistError) {
+        console.error('Erro ao criar checklist:', checklistError);
+        throw new Error(`${task.code} foi criada, mas o checklist não pôde ser salvo.`);
+      }
     }
 
     // Registrar no histórico
@@ -278,7 +323,7 @@ class DataServiceV2 {
 
     if (error) {
       console.error('Erro ao atualizar campo:', error);
-      return null;
+      throw new Error('Não foi possível salvar a alteração.');
     }
 
     // Registrar no histórico
@@ -311,6 +356,10 @@ class DataServiceV2 {
     const task = await this.getTaskById(taskId);
     if (!task) return null;
 
+    // Mesmo status: nada a gravar (evita "alterado de X para X" no histórico).
+    // Bloqueada é exceção, pois reenviar pode atualizar o motivo.
+    if (task.status === newStatus && newStatus !== STATUS_BLOCKED) return task;
+
     const nowIso = new Date().toISOString();
     const updateData = {
       status: newStatus,
@@ -318,9 +367,8 @@ class DataServiceV2 {
       updated_at: nowIso
     };
 
-    if (newStatus === 'Concluída') {
-      updateData.completed_at = nowIso;
-    }
+    // Ao concluir grava a data; ao reabrir (qualquer outro status) limpa, senão a tarefa fica com data de conclusão antiga.
+    updateData.completed_at = newStatus === 'Concluída' ? nowIso : null;
 
     const { error } = await supabase
       .from('tasks')
@@ -329,7 +377,7 @@ class DataServiceV2 {
 
     if (error) {
       console.error('Erro ao atualizar status:', error);
-      return null;
+      throw new Error('Não foi possível alterar o status.');
     }
 
     // Registrar no histórico
@@ -354,7 +402,7 @@ class DataServiceV2 {
     const from = this.getUserById(task.assignedToId).name;
     const newStatus = task.status === 'Não Iniciada' ? 'Em Andamento' : task.status;
 
-    await supabase
+    const { error } = await supabase
       .from('tasks')
       .update({
         assigned_to_id: me.id,
@@ -362,6 +410,11 @@ class DataServiceV2 {
         updated_at: new Date().toISOString()
       })
       .eq('id', taskId);
+
+    if (error) {
+      console.error('Erro ao assumir tarefa:', error);
+      throw new Error('Não foi possível assumir a tarefa.');
+    }
 
     await this.log(taskId, 'TAKEOVER', `Assumida por ${me.name} (antes: ${from}).`);
 
@@ -377,10 +430,11 @@ class DataServiceV2 {
 
     if (error) {
       console.error('Erro ao deletar tarefa:', error);
-      return false;
+      throw new Error('Não foi possível excluir a tarefa.');
     }
 
-    await this.log(taskId, 'EXCLUSÃO', 'Tarefa excluída.');
+    // touch:false, pois a tarefa já está marcada como excluída e a RLS não deixa atualizá-la.
+    await this.log(taskId, 'EXCLUSÃO', 'Tarefa excluída.', null, { touch: false });
     return true;
   }
 
@@ -392,14 +446,19 @@ class DataServiceV2 {
       .from('checklist_items')
       .select('*')
       .eq('id', checkId)
-      .single();
+      .maybeSingle();
 
     if (!item) return null;
 
-    await supabase
+    const { error } = await supabase
       .from('checklist_items')
       .update({ done: !item.done, updated_at: new Date().toISOString() })
       .eq('id', checkId);
+
+    if (error) {
+      console.error('Erro ao atualizar item da checklist:', error);
+      throw new Error('Não foi possível atualizar o item do checklist.');
+    }
 
     await this.log(
       taskId,
@@ -424,17 +483,22 @@ class DataServiceV2 {
 
     if (error) {
       console.error('Erro ao adicionar item da checklist:', error);
-      return null;
+      throw new Error('Não foi possível adicionar o item ao checklist.');
     }
 
     return await this.getTaskById(taskId);
   }
 
   async deleteChecklistItem(taskId, checkId) {
-    await supabase
+    const { error } = await supabase
       .from('checklist_items')
       .delete()
       .eq('id', checkId);
+
+    if (error) {
+      console.error('Erro ao remover item da checklist:', error);
+      throw new Error('Não foi possível remover o item do checklist.');
+    }
 
     return await this.getTaskById(taskId);
   }
@@ -461,7 +525,7 @@ class DataServiceV2 {
 
     if (error) {
       console.error('Erro ao adicionar comentário:', error);
-      return null;
+      throw new Error('Não foi possível salvar o comentário.');
     }
 
     await this.log(taskId, 'COMENTÁRIO', `Comentário de ${me.name}.`);
@@ -482,9 +546,7 @@ class DataServiceV2 {
       const ext = fileName.split('.').pop() || 'png';
       const storagePath = `${timestamp}_${randomId}.${ext}`;
       
-      console.log('📤 Upload para Supabase Storage...');
-      
-      const { data, error } = await supabase.storage
+      const { error } = await supabase.storage
         .from('taskhub-uploads')
         .upload(storagePath, blob, {
           contentType: blob.type,
@@ -493,15 +555,14 @@ class DataServiceV2 {
         });
 
       if (error) {
+        // Não salva o arquivo em base64 no banco: isso inflava a tabela e mascarava a falha como sucesso.
         console.error('❌ Erro no upload:', error);
-        return { success: true, url: dataUrl, fileName, fallback: true };
+        return { success: false, error: 'Não foi possível enviar o arquivo. Verifique a conexão e as permissões do bucket.' };
       }
 
       const { data: { publicUrl } } = supabase.storage
         .from('taskhub-uploads')
         .getPublicUrl(storagePath);
-
-      console.log('✅ Upload bem-sucedido:', publicUrl);
 
       return { 
         success: true, 
@@ -509,12 +570,11 @@ class DataServiceV2 {
         fileName,
         storagePath,
         mimeType: blob.type,
-        size: `${Math.round(blob.size / 1024)} KB`,
-        fallback: false
+        size: `${Math.round(blob.size / 1024)} KB`
       };
     } catch (err) {
       console.error('❌ Falha no upload:', err);
-      return { success: true, url: dataUrl, fileName, fallback: true };
+      return { success: false, error: 'Falha ao enviar o arquivo. Tente de novo.' };
     }
   }
 
@@ -539,7 +599,9 @@ class DataServiceV2 {
 
     if (error) {
       console.error('Erro ao adicionar anexo:', error);
-      return null;
+      // O arquivo já subiu para o bucket; remove para não deixar órfão.
+      if (storagePath) await supabase.storage.from('taskhub-uploads').remove([storagePath]);
+      throw new Error('O arquivo foi enviado, mas não consegui registrar o anexo na tarefa.');
     }
 
     await this.log(taskId, 'ANEXO', `Anexo adicionado: "${fileName}".`);
@@ -659,8 +721,15 @@ class DataServiceV2 {
     if (filters.taskId) {
       query = query.eq('task_id', filters.taskId);
     }
-    if (filters.actorId && filters.actorId !== 'ALL') {
-      query = query.eq('actor_id', filters.actorId);
+    // A interface envia `userId`. Mantém a mesma regra do filtro na tela: a pessoa fez a ação
+    // OU é citada na descrição (ex.: "Reatribuída de A para B"). Sem isso o filtro só valia para os 500 registros mais recentes.
+    const personId = filters.userId && filters.userId !== 'ALL' ? filters.userId : filters.actorId;
+    if (personId && personId !== 'ALL') {
+      const person = this.users.find((u) => u.id === personId);
+      const quote = (v) => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      const conditions = [`actor_id.eq.${quote(personId)}`];
+      if (person?.name) conditions.push(`description.ilike.${quote(`*${person.name}*`)}`);
+      query = query.or(conditions.join(','));
     }
     if (filters.action && filters.action !== 'ALL') {
       query = query.eq('action', filters.action);
@@ -678,12 +747,7 @@ class DataServiceV2 {
 
     if (error) {
       console.error('❌ Erro ao carregar histórico:', error);
-      return [];
-    }
-
-    console.log('📋 Audit history carregado:', data?.length || 0, 'registros');
-    if (data && data.length > 0) {
-      console.log('📋 Primeiro registro:', data[0]);
+      throw new Error('Não foi possível carregar o histórico.');
     }
 
     return data || [];

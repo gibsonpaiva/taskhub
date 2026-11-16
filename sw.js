@@ -4,8 +4,6 @@
 // e abrir a tarefa certa quando a notificação é tocada.
 // =============================================================================
 
-const CACHE_NAME = "taskhub-sw-v1";
-
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });

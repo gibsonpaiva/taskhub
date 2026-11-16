@@ -35,7 +35,7 @@ function applyFilters(tasks, users, currentUser, filters) {
   return tasks.filter((t) => {
     if (q) {
       const assignee = users.find((u) => u.id === t.assignedToId);
-      const haystack = [t.title, t.code, t.system, t.description, assignee?.name].join(' ').toLowerCase();
+      const haystack = [t.title, t.code, t.ticketNumber, t.client, t.system, t.description, assignee?.name].join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
     if (quick === 'mine' && t.assignedToId !== currentUser.id) return false;

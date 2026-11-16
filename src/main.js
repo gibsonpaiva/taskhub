@@ -70,16 +70,21 @@ function renderToast() {
 // =============================================================================
 // RENDERIZAÇÃO
 // =============================================================================
-function getModalHtml() {
-  const currentUser = db.getCurrentUser();
-  if (uiState.activeModal === 'task-detail' && uiState.selectedTaskId) {
-    // Será carregado async no renderModalOnly
-    return '<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40"><p class="text-white">Carregando...</p></div>';
-  }
-  if (uiState.activeModal === 'new-task') {
-    return renderNewTaskModal({ users: db.users, currentUser });
-  }
-  return '';
+// Cartão de erro com botão "Tentar de novo" (usado quando a tela inicial não consegue carregar).
+function renderErrorCard(root, title, message, { onRetry, onLogout } = {}) {
+  root.innerHTML = `
+    <div class="min-h-screen flex items-center justify-center p-6">
+      <div class="max-w-sm bg-white rounded-2xl shadow-card p-6 text-center space-y-4">
+        <p class="text-sm font-bold text-slate-900">${escapeHtml(title)}</p>
+        <p class="text-xs text-slate-500">${escapeHtml(message)}</p>
+        <div class="flex justify-center gap-2">
+          <button id="error-retry" class="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-bold">Tentar de novo</button>
+          ${onLogout ? '<button id="error-logout" class="px-4 py-2 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100">Sair</button>' : ''}
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('error-retry').onclick = onRetry;
+  if (onLogout) document.getElementById('error-logout').onclick = onLogout;
 }
 
 function renderModalOnly() {
@@ -90,8 +95,13 @@ function renderModalOnly() {
 
   // Para tarefas, carregar do banco
   if (uiState.activeModal === 'task-detail' && uiState.selectedTaskId) {
-    db.getTaskById(uiState.selectedTaskId).then(task => {
+    const taskId = uiState.selectedTaskId;
+    db.getTaskById(taskId).then(task => {
+      // A pessoa pode ter fechado o modal (ou aberto outra tarefa) enquanto a busca rodava.
+      if (uiState.activeModal !== 'task-detail' || uiState.selectedTaskId !== taskId) return;
+
       if (!task) {
+        showToast('Esta tarefa não existe mais.', 'error');
         closeModal();
         return;
       }
@@ -109,6 +119,10 @@ function renderModalOnly() {
 
       refreshIcons();
       setupModalListeners();
+    }).catch(err => {
+      console.error(err);
+      showToast(err.message || 'Não foi possível abrir a tarefa.', 'error');
+      closeModal();
     });
   } else if (uiState.activeModal === 'new-task') {
     const prevScroll = document.getElementById('modal-scroll')?.scrollTop ?? 0;
@@ -150,19 +164,20 @@ function openModal(name, taskId = null) {
   renderModalOnly();
 }
 
-function renderApp({ skipModal = false } = {}) {
+// Retorna a Promise para quem precisar esperar o DOM terminar de atualizar
+// (ex.: animação de troca de coluna). Nunca rejeita: falhas viram aviso na tela.
+async function renderApp({ skipModal = false } = {}) {
   const root = document.getElementById('app');
-  if (!root) return Promise.resolve();
+  if (!root) return;
 
   const currentUser = db.getCurrentUser();
   if (!currentUser) {
     root.innerHTML = `<p class="p-10 text-sm text-slate-500">Carregando usuários...</p>`;
-    return Promise.resolve();
+    return;
   }
 
-  // Carregar tarefas do banco (async) — retorna a Promise para quem precisar
-  // esperar o DOM terminar de atualizar (ex.: animação de troca de coluna).
-  return db.getTasks().then(async tasks => {
+  try {
+    const tasks = await db.getTasks();
     const state = { 
       currentUser, 
       users: db.users, 
@@ -194,28 +209,43 @@ function renderApp({ skipModal = false } = {}) {
     else renderModalOnly();
     refreshIcons(); // sempre redesenha os ícones (antes faltavam quando não havia modal aberto)
     renderToast();
-  });
+  } catch (err) {
+    console.error(err);
+    if (document.getElementById('main-view-content')) {
+      showToast(err.message || 'Não foi possível atualizar a tela.', 'error');
+    } else {
+      // Primeira carga falhou: não há tela para manter, então oferece tentar de novo.
+      renderErrorCard(root, 'Não foi possível carregar os dados', err.message || 'Erro desconhecido.', {
+        onRetry: () => renderApp(),
+        onLogout: logout,
+      });
+    }
+  }
 }
 
 // Atualiza apenas a lista (quadro/histórico), mantendo o foco do campo de busca.
 async function renderListOnly() {
   const currentUser = db.getCurrentUser();
-  
-  if (uiState.currentTab === 'audit') {
-    const auditData = await db.getAuditHistory(uiState.auditFilters);
-    const tasks = await db.getTasks();
-    const state = { users: db.users, tasks, auditLog: auditData };
-    const el = document.getElementById('audit-list');
-    if (el) el.innerHTML = renderAuditList({ state, filters: uiState.auditFilters });
-    refreshIcons();
-  } else {
-    const tasks = await db.getTasks();
-    const state = { currentUser, users: db.users, tasks };
-    const el = document.getElementById('board-content');
-    if (el) {
-      el.innerHTML = renderBoardContent({ state, currentUser, filters: uiState.kanbanFilters, viewMode: uiState.kanbanViewMode });
+
+  try {
+    if (uiState.currentTab === 'audit') {
+      const [auditData, tasks] = await Promise.all([db.getAuditHistory(uiState.auditFilters), db.getTasks()]);
+      const state = { users: db.users, tasks, auditLog: auditData };
+      const el = document.getElementById('audit-list');
+      if (el) el.innerHTML = renderAuditList({ state, filters: uiState.auditFilters });
+      refreshIcons();
+    } else {
+      const tasks = await db.getTasks();
+      const state = { currentUser, users: db.users, tasks };
+      const el = document.getElementById('board-content');
+      if (el) {
+        el.innerHTML = renderBoardContent({ state, currentUser, filters: uiState.kanbanFilters, viewMode: uiState.kanbanViewMode });
+      }
+      refreshIcons();
     }
-    refreshIcons();
+  } catch (err) {
+    console.error(err);
+    showToast(err.message || 'Não foi possível atualizar a lista.', 'error');
   }
 }
 
@@ -231,15 +261,20 @@ async function processAndUploadFile(file, taskId) {
   });
 
   const res = await db.uploadFile(dataUrl, file.name);
-  if (!res.success) return showToast('Erro ao anexar arquivo', 'error');
+  if (!res.success) return showToast(res.error || 'Erro ao anexar arquivo', 'error');
 
-  await db.addAttachment(taskId, {
-    fileName: file.name,
-    url: res.url,
-    size: `${Math.round(file.size / 1024)} KB`,
-    storagePath: res.storagePath,
-    mimeType: res.mimeType,
-  });
+  try {
+    await db.addAttachment(taskId, {
+      fileName: file.name,
+      url: res.url,
+      size: `${Math.round(file.size / 1024)} KB`,
+      storagePath: res.storagePath,
+      mimeType: res.mimeType,
+    });
+  } catch (err) {
+    console.error(err);
+    return showToast(err.message || 'Erro ao anexar arquivo', 'error');
+  }
   showToast(`"${file.name}" anexado`);
   if (uiState.selectedTaskId === taskId) renderModalOnly();
 }
@@ -283,8 +318,14 @@ window.addEventListener('paste', (e) => {
 // =============================================================================
 async function changeStatus(taskId, status, reason = '') {
   const before = snapshotPositions();
-  const task = await db.updateTaskStatus(taskId, status, reason);
-  if (task) showToast(`${task.code}: ${status}`);
+  try {
+    const task = await db.updateTaskStatus(taskId, status, reason);
+    if (task) showToast(`${task.code}: ${status}`);
+  } catch (err) {
+    console.error(err);
+    showToast(err.message || 'Não foi possível alterar o status.', 'error');
+  }
+  // Redesenha sempre: se falhou, o quadro volta ao estado real (o card arrastado deixa de aparecer na coluna errada).
   await renderApp();
   playFlip(before);
   pulseLanding(taskId);
@@ -394,10 +435,17 @@ const actions = {
 // =============================================================================
 function setupEventListeners() {
   // Cliques em [data-action]
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-action]');
     const handler = el && actions[el.dataset.action];
-    if (handler) handler(el, e);
+    if (!handler) return;
+    try {
+      await handler(el, e);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Algo deu errado. Tente de novo.', 'error');
+      renderApp(); // volta a tela ao estado real do banco
+    }
   });
 
   // Digitação: busca atualiza só a lista, sem perder o foco
@@ -452,9 +500,17 @@ function setupEventListeners() {
 
     // Edição direta dos campos da tarefa
     if (t.dataset.field && t.dataset.taskId) {
-      await db.updateTaskField(t.dataset.taskId, t.dataset.field, t.value);
+      let failed = false;
+      try {
+        await db.updateTaskField(t.dataset.taskId, t.dataset.field, t.value);
+      } catch (err) {
+        failed = true;
+        console.error(err);
+        showToast(err.message || 'Não foi possível salvar a alteração.', 'error');
+      }
       // Troca de responsável muda botões do modal; os demais campos não.
-      renderApp({ skipModal: t.dataset.field !== 'assignedToId' });
+      // Se falhou, redesenha também o modal para o campo voltar ao valor salvo.
+      renderApp({ skipModal: !failed && t.dataset.field !== 'assignedToId' });
     }
   });
 
@@ -548,7 +604,12 @@ function setupEventListeners() {
     draggingTaskId = card.dataset.taskId;
     dropHandled = false;
     lastOverKey = '';
-    dragOrigin = { parent: card.parentElement, nextSibling: card.nextElementSibling };
+    // `status` é a coluna de onde o card saiu, lida do DOM. Não consulta o banco, pois dragover dispara dezenas de vezes por segundo.
+    dragOrigin = {
+      parent: card.parentElement,
+      nextSibling: card.nextElementSibling,
+      status: card.closest('[data-column-status]')?.dataset.columnStatus ?? null,
+    };
 
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', draggingTaskId);
@@ -600,12 +661,11 @@ function setupEventListeners() {
       col.classList.add('drop-target');
     }
 
-    const task = db.getTaskById(draggingTaskId);
     const card = document.querySelector(`.task-card[data-task-id="${draggingTaskId}"]`);
-    if (!task || !card) return;
+    if (!dragOrigin || !card) return;
 
     // Sobre a coluna de origem: devolve o card ao lugar exato (sem reordenação manual persistida).
-    if (col.dataset.columnStatus === task.status) {
+    if (col.dataset.columnStatus === dragOrigin.status) {
       if (lastOverKey !== 'origin') {
         lastOverKey = 'origin';
         const before = snapshotPositions();
@@ -651,17 +711,22 @@ function setupEventListeners() {
 
     const taskId = draggingTaskId;
     const status = col.dataset.columnStatus;
+    const originStatus = dragOrigin?.status; // lido agora: o dragend (logo após o drop) zera dragOrigin
     dropHandled = true;
     draggingTaskId = null;
     clearDropTargets();
 
-    const task = db.getTaskById(taskId);
-    if (!task || task.status === status) return; // sem mudança real: o card já está de volta ao lugar original
+    // Soltou na própria coluna: sem mudança real, o card já voltou ao lugar original.
+    if (!originStatus || originStatus === status) return;
 
     let reason = '';
     if (status === BLOCKED) {
       const answer = prompt('Motivo do bloqueio:', '');
-      if (answer === null) return;
+      if (answer === null) {
+        // Cancelou o motivo: desfaz o preview e devolve o card à coluna de origem.
+        await renderApp();
+        return;
+      }
       reason = answer;
     }
     await changeStatus(taskId, status, reason);
@@ -685,19 +750,10 @@ async function startApp(authUser) {
     await db.init(authUser);
   } catch (err) {
     console.error(err);
-    root.innerHTML = `
-      <div class="min-h-screen flex items-center justify-center p-6">
-        <div class="max-w-sm bg-white rounded-2xl shadow-card p-6 text-center space-y-4">
-          <p class="text-sm font-bold text-slate-900">Não foi possível abrir o TaskHub</p>
-          <p class="text-xs text-slate-500">${escapeHtml(err.message)}</p>
-          <div class="flex justify-center gap-2">
-            <button id="startup-retry" class="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-bold">Tentar de novo</button>
-            <button id="startup-logout" class="px-4 py-2 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100">Sair</button>
-          </div>
-        </div>
-      </div>`;
-    document.getElementById('startup-retry').onclick = () => startApp(authUser);
-    document.getElementById('startup-logout').onclick = logout;
+    renderErrorCard(root, 'Não foi possível abrir o TaskHub', err.message, {
+      onRetry: () => startApp(authUser),
+      onLogout: logout,
+    });
     return;
   }
 

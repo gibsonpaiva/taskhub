@@ -129,7 +129,7 @@ taskhub/
 └── src/
     ├── main.js                   # App principal
     ├── services/
-    │   └── dataService.js        # Integração Supabase
+    │   └── dataServiceV2.js      # Integração Supabase
     ├── components/               # Componentes UI
     │   ├── Header.js
     │   ├── KanbanView.js
