@@ -422,18 +422,25 @@ class DataServiceV2 {
   }
 
   async deleteTask(taskId) {
-    // Soft delete
-    const { error } = await supabase
-      .from('tasks')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', taskId);
+    // Exclusão "de leve" (preenche deleted_at) feita por uma função no banco.
+    // Um UPDATE direto é recusado pela RLS, que esconde linhas excluídas e checa a linha nova.
+    // A função é criada por CORRIGIR_EXCLUSAO_TAREFAS.sql.
+    const { data: deleted, error } = await supabase.rpc('soft_delete_task', { p_task_id: taskId });
 
     if (error) {
       console.error('Erro ao deletar tarefa:', error);
-      throw new Error('Não foi possível excluir a tarefa.');
+      const missing = error.code === 'PGRST202' || /soft_delete_task/i.test(error.message || '');
+      throw new Error(
+        missing
+          ? 'Falta criar a função de exclusão no Supabase. Rode o arquivo CORRIGIR_EXCLUSAO_TAREFAS.sql.'
+          : 'Não foi possível excluir a tarefa.'
+      );
     }
 
-    // touch:false, pois a tarefa já está marcada como excluída e a RLS não deixa atualizá-la.
+    // false = já estava excluída (ex.: outra pessoa excluiu antes). O resultado final é o esperado; não duplica o histórico.
+    if (deleted === false) return true;
+
+    // touch:false, pois a tarefa já está excluída e a RLS não deixa atualizá-la.
     await this.log(taskId, 'EXCLUSÃO', 'Tarefa excluída.', null, { touch: false });
     return true;
   }

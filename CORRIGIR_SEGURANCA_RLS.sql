@@ -43,8 +43,11 @@ DROP POLICY IF EXISTS "Allow all access to taskhub_uploads" ON taskhub_uploads;
 --    nessa troca, perdeu o filtro que escondia tarefas excluídas
 --    (deleted_at IS NULL). Hoje, qualquer colega logado que chame a API
 --    diretamente (sem passar pela tela do app) vê as tarefas já excluídas.
---    Restaura o filtro, mantendo o UPDATE liberado para o soft-delete
---    (marcar deleted_at) continuar funcionando normalmente.
+--    Restaura o filtro.
+--    ATENÇÃO: esta política impede o soft-delete feito por UPDATE direto
+--    (o Postgres checa a linha nova contra USING e a recusa com 42501).
+--    Por isso a exclusão passa pela função soft_delete_task, criada em
+--    CORRIGIR_EXCLUSAO_TAREFAS.sql. Rode aquele arquivo depois deste.
 DROP POLICY IF EXISTS "Somente logados" ON tasks;
 CREATE POLICY "Somente logados"
 ON tasks FOR ALL TO authenticated
